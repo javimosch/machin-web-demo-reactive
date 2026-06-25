@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>machin · reactive (signals + patch list)</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    font: 16px/1.5 system-ui, sans-serif; color: #e6e6f0;
+    background: radial-gradient(120% 120% at 50% 0%, #101a2e 0%, #08080f 60%);
+  }
+  .card {
+    width: min(440px, 92vw); padding: 28px 32px 30px; border-radius: 16px;
+    background: #0f1525; border: 1px solid #233055; box-shadow: 0 20px 60px -20px #000;
+  }
+  h1 { margin: 0 0 4px; font-size: 18px; color: #6fa8ff; letter-spacing: .3px; }
+  .big {
+    font-size: 72px; font-weight: 800; line-height: 1; margin: 10px 0 6px;
+    background: linear-gradient(90deg, #66e0ff, #8b9bff); -webkit-background-clip: text;
+    background-clip: text; color: transparent;
+  }
+  p { margin: 2px 0; color: #b3bdd6; } b { color: #e6e6f0; }
+  .row { display: flex; gap: 10px; margin-top: 20px; }
+  button {
+    flex: 1; padding: 11px 0; font-size: 17px; font-weight: 700; cursor: pointer;
+    border-radius: 10px; border: 1px solid #324a7a; background: #1a2545; color: #e6e6f0;
+  }
+  button:hover { background: #223160; }
+  .steps { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+  .steps span.lbl { color: #7d88a6; font-size: 13px; margin-right: 4px; }
+  .steps button { flex: 0 0 auto; padding: 7px 14px; font-size: 14px; }
+  .tag { margin-top: 18px; font-size: 12px; color: #6b76a0; text-align: center; }
+  code { color: #6fa8ff; }
+  /* a patched slot flashes, so you can SEE that only the changed slots update */
+  [data-s] { border-radius: 4px; padding: 0 2px; transition: background-color .05s; }
+  [data-s].flash { background: #2e6cff66; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div id="app">
+      <h1>machin · reactive counter</h1>
+      <div class="big"><span data-s="count">0</span></div>
+      <p>n squared = <b><span data-s="sq">0</span></b></p>
+      <p>fib(n) = <b><span data-s="fib">0</span></b></p>
+      <p>step = <b><span data-s="step">1</span></b></p>
+    </div>
+    <div class="row">
+      <button id="dec">− step</button>
+      <button id="inc">+ step</button>
+    </div>
+    <div class="steps">
+      <span class="lbl">step:</span>
+      <button data-step="1">1</button>
+      <button data-step="2">2</button>
+      <button data-step="5">5</button>
+    </div>
+    <div class="tag">signals + a <b>patch list</b> in <code>app.src</code> (MFL→wasm) · only the changed slots flash</div>
+  </main>
+
+<script type="module">
+  // ---- host: apply each patch by slot id (no innerHTML replacement, no vdom) ----
+  let memory;
+  const decoder = new TextDecoder();
+  const readCString = (ptr) => {
+    const b = new Uint8Array(memory.buffer); let e = ptr; while (b[e]) e++;
+    return decoder.decode(b.subarray(ptr, e));
+  };
+
+  const imports = {
+    // machin → DOM. The whole patch list is this function, called once per
+    // changed slot. Flash the element so the surgical updates are visible.
+    env: {
+      dom_patch: (slotPtr, valPtr) => {
+        const slot = readCString(slotPtr), val = readCString(valPtr);
+        const el = document.querySelector(`[data-s="${slot}"]`);
+        if (!el) return;
+        el.textContent = val;
+        el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+      },
+    },
+    // A no-op WASI shim: indirect closure calls keep the float-format path in the
+    // binary, so wasi-libc's stdio symbols are imported — but never called (we only
+    // format to buffers). Stubbing them satisfies instantiation.
+    wasi_snapshot_preview1: {
+      fd_write: () => 0, fd_seek: () => 0, fd_close: () => 0, fd_fdstat_get: () => 0,
+    },
+  };
+
+  const { instance } = await WebAssembly.instantiateStreaming(fetch('./app.wasm'), imports);
+  memory = instance.exports.memory;
+  instance.exports._initialize?.();
+
+  const bump = (dir) => instance.exports.bump(BigInt(dir));
+  document.getElementById('inc').onclick = () => bump(1);
+  document.getElementById('dec').onclick = () => bump(-1);
+  for (const b of document.querySelectorAll('.steps button')) {
+    b.onclick = () => instance.exports.set_step(BigInt(b.dataset.step));
+  }
+  instance.exports.start();   // signals seed their slots; initial paint via dom_patch
+</script>
+</body>
+</html>

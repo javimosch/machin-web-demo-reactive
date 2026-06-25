@@ -1,0 +1,20 @@
+// app.src — a counter component. State and view logic live in machin: each piece
+// of the view is a SIGNAL-bound slot, so a click patches only the slots that
+// actually changed. `step` is an independent signal — changing it never touches
+// count/sq/fib, and bumping never touches step.
+func fib(n) (r) { if n < 2 { r = n } else { r = fib(n - 1) + fib(n - 2) } }
+
+var count = 0    // holds the count signal's id
+var step = 0     // holds the step signal's id
+
+export func start() {
+    count = signal(0)
+    step = signal(1)
+    bind("count", func() { return str(get(count)) })
+    bind("sq",    func() { return str(get(count) * get(count)) })
+    bind("fib",   func() { return str(fib(get(count))) })
+    bind("step",  func() { return str(get(step)) })
+}
+
+export func bump(dir)   { set(count, get(count) + dir * get(step)) }
+export func set_step(s) { set(step, s) }
