@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>machin · reactive (signals + patch list)</title>
+<title>machin · reactive (computed + keyed list)</title>
 <style>
   :root { color-scheme: dark; }
   body {
@@ -12,94 +12,86 @@
     background: radial-gradient(120% 120% at 50% 0%, #101a2e 0%, #08080f 60%);
   }
   .card {
-    width: min(440px, 92vw); padding: 28px 32px 30px; border-radius: 16px;
+    width: min(460px, 92vw); padding: 26px 30px 30px; border-radius: 16px;
     background: #0f1525; border: 1px solid #233055; box-shadow: 0 20px 60px -20px #000;
   }
-  h1 { margin: 0 0 4px; font-size: 18px; color: #6fa8ff; letter-spacing: .3px; }
-  .big {
-    font-size: 72px; font-weight: 800; line-height: 1; margin: 10px 0 6px;
+  h1 { margin: 0 0 12px; font-size: 18px; color: #6fa8ff; letter-spacing: .3px; }
+  .stats { display: flex; gap: 24px; margin-bottom: 14px; }
+  .stat .k { font-size: 12px; color: #7d88a6; text-transform: uppercase; letter-spacing: .5px; }
+  .stat .v { font-size: 34px; font-weight: 800; line-height: 1;
     background: linear-gradient(90deg, #66e0ff, #8b9bff); -webkit-background-clip: text;
-    background-clip: text; color: transparent;
-  }
-  p { margin: 2px 0; color: #b3bdd6; } b { color: #e6e6f0; }
-  .row { display: flex; gap: 10px; margin-top: 20px; }
-  button {
-    flex: 1; padding: 11px 0; font-size: 17px; font-weight: 700; cursor: pointer;
-    border-radius: 10px; border: 1px solid #324a7a; background: #1a2545; color: #e6e6f0;
-  }
+    background-clip: text; color: transparent; }
+  .items { list-style: none; margin: 0 0 16px; padding: 8px; min-height: 56px;
+    display: flex; flex-wrap: wrap; gap: 8px; background: #0b101d;
+    border: 1px solid #1c2742; border-radius: 10px; }
+  .items li { padding: 6px 12px; border-radius: 8px; background: #1a2545;
+    border: 1px solid #2c3a63; font-weight: 700; }
+  .items li b { color: #cfe0ff; font-weight: 800; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { padding: 9px 14px; font-size: 14px; font-weight: 700; cursor: pointer;
+    border-radius: 9px; border: 1px solid #324a7a; background: #1a2545; color: #e6e6f0; }
   button:hover { background: #223160; }
-  .steps { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
-  .steps span.lbl { color: #7d88a6; font-size: 13px; margin-right: 4px; }
-  .steps button { flex: 0 0 auto; padding: 7px 14px; font-size: 14px; }
-  .tag { margin-top: 18px; font-size: 12px; color: #6b76a0; text-align: center; }
+  button.primary { background: #2546a0; border-color: #3a63c8; }
+  .tag { margin-top: 16px; font-size: 12px; color: #6b76a0; text-align: center; }
   code { color: #6fa8ff; }
-  /* a patched slot flashes, so you can SEE that only the changed slots update */
-  [data-s] { border-radius: 4px; padding: 0 2px; transition: background-color .05s; }
-  [data-s].flash { background: #2e6cff66; }
+  .flash { animation: fl .5s ease; }
+  @keyframes fl { from { background: #2e6cff88; } to {} }
 </style>
 </head>
 <body>
   <main class="card">
-    <div id="app">
-      <h1>machin · reactive counter</h1>
-      <div class="big"><span data-s="count">0</span></div>
-      <p>n squared = <b><span data-s="sq">0</span></b></p>
-      <p>fib(n) = <b><span data-s="fib">0</span></b></p>
-      <p>step = <b><span data-s="step">1</span></b></p>
+    <h1>machin · reactive list</h1>
+    <div class="stats">
+      <div class="stat"><div class="k">sum</div><div class="v" data-s="sum">0</div></div>
+      <div class="stat"><div class="k">count</div><div class="v" data-s="count">0</div></div>
     </div>
+    <ul id="items" class="items"></ul>
     <div class="row">
-      <button id="dec">− step</button>
-      <button id="inc">+ step</button>
+      <button id="add" class="primary">+ add</button>
+      <button id="pop">− pop</button>
+      <button id="sort">sort ↑</button>
+      <button id="rev">reverse</button>
     </div>
-    <div class="steps">
-      <span class="lbl">step:</span>
-      <button data-step="1">1</button>
-      <button data-step="2">2</button>
-      <button data-step="5">5</button>
-    </div>
-    <div class="tag">signals + a <b>patch list</b> in <code>app.src</code> (MFL→wasm) · only the changed slots flash</div>
+    <div class="tag">signals + computed + keyed list in <code>app.src</code> (MFL→wasm) · only deltas patch the DOM</div>
   </main>
 
 <script type="module">
-  // ---- host: apply each patch by slot id (no innerHTML replacement, no vdom) ----
   let memory;
-  const decoder = new TextDecoder();
-  const readCString = (ptr) => {
-    const b = new Uint8Array(memory.buffer); let e = ptr; while (b[e]) e++;
-    return decoder.decode(b.subarray(ptr, e));
-  };
+  const dec = new TextDecoder();
+  const cstr = (p) => { const b = new Uint8Array(memory.buffer); let e = p; while (b[e]) e++; return dec.decode(b.subarray(p, e)); };
+  const flash = (el) => { if (!el) return; el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); };
+  const items = document.getElementById('items');
 
   const imports = {
-    // machin → DOM. The whole patch list is this function, called once per
-    // changed slot. Flash the element so the surgical updates are visible.
     env: {
-      dom_patch: (slotPtr, valPtr) => {
-        const slot = readCString(slotPtr), val = readCString(valPtr);
-        const el = document.querySelector(`[data-s="${slot}"]`);
-        if (!el) return;
-        el.textContent = val;
-        el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+      // bind → set a text slot
+      dom_patch: (s, v) => { const el = document.querySelector(`[data-s="${cstr(s)}"]`); if (el) { el.textContent = cstr(v); flash(el); } },
+      // each → keyed list ops (the patch list): insert / remove / reorder
+      list_insert: (c, k, html) => {
+        const li = document.createElement('li');
+        li.dataset.k = cstr(k); li.innerHTML = cstr(html);
+        document.getElementById(cstr(c)).appendChild(li); flash(li);
+      },
+      list_remove: (c, k) => { const el = document.querySelector(`#${cstr(c)} > [data-k="${cstr(k)}"]`); if (el) el.remove(); },
+      list_order: (c, csv) => {
+        const cont = document.getElementById(cstr(c));
+        const order = cstr(csv).split(',').filter(Boolean);
+        for (const key of order) { const el = cont.querySelector(`[data-k="${key}"]`); if (el) cont.appendChild(el); }
       },
     },
-    // A no-op WASI shim: indirect closure calls keep the float-format path in the
-    // binary, so wasi-libc's stdio symbols are imported — but never called (we only
-    // format to buffers). Stubbing them satisfies instantiation.
-    wasi_snapshot_preview1: {
-      fd_write: () => 0, fd_seek: () => 0, fd_close: () => 0, fd_fdstat_get: () => 0,
-    },
+    // no-op WASI shim (imported but never called; see README)
+    wasi_snapshot_preview1: { fd_write: () => 0, fd_seek: () => 0, fd_close: () => 0, fd_fdstat_get: () => 0 },
   };
 
   const { instance } = await WebAssembly.instantiateStreaming(fetch('./app.wasm'), imports);
   memory = instance.exports.memory;
   instance.exports._initialize?.();
 
-  const bump = (dir) => instance.exports.bump(BigInt(dir));
-  document.getElementById('inc').onclick = () => bump(1);
-  document.getElementById('dec').onclick = () => bump(-1);
-  for (const b of document.querySelectorAll('.steps button')) {
-    b.onclick = () => instance.exports.set_step(BigInt(b.dataset.step));
-  }
-  instance.exports.start();   // signals seed their slots; initial paint via dom_patch
+  document.getElementById('add').onclick  = () => instance.exports.add(BigInt(1 + (Math.random() * 49 | 0)));
+  document.getElementById('pop').onclick  = () => instance.exports.pop();
+  document.getElementById('sort').onclick = () => instance.exports.sort_up();
+  document.getElementById('rev').onclick  = () => instance.exports.reverse();
+  instance.exports.start();
 </script>
 </body>
 </html>

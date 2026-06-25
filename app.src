@@ -1,20 +1,85 @@
-// app.src — a counter component. State and view logic live in machin: each piece
-// of the view is a SIGNAL-bound slot, so a click patches only the slots that
-// actually changed. `step` is an independent signal — changing it never touches
-// count/sq/fib, and bumping never touches step.
-func fib(n) (r) { if n < 2 { r = n } else { r = fib(n - 1) + fib(n - 2) } }
+// app.src — a reactive list with derived state, all in machin. Add numbers; a
+// computed SUM and COUNT update only when they change; sorting/reversing emits
+// only DOM reorders (no item is re-rendered). Each item is keyed by a stable id.
 
-var count = 0    // holds the count signal's id
-var step = 0     // holds the step signal's id
+var ver = 0          // a version signal: bump it on any list mutation
+var ids = []int{}    // stable keys
+var vals = []int{}   // parallel values
+var n = 0
+var nid = 1
+var sum_sig = 0      // a computed signal's id
 
-export func start() {
-    count = signal(0)
-    step = signal(1)
-    bind("count", func() { return str(get(count)) })
-    bind("sq",    func() { return str(get(count) * get(count)) })
-    bind("fib",   func() { return str(fib(get(count))) })
-    bind("step",  func() { return str(get(step)) })
+func val_of(id) (r) {
+    r = 0
+    i := 0
+    while i < n {
+        if ids[i] == id { r = vals[i] }
+        i = i + 1
+    }
 }
 
-export func bump(dir)   { set(count, get(count) + dir * get(step)) }
-export func set_step(s) { set(step, s) }
+func bump_ver() { set(ver, get(ver) + 1) }
+
+export func start() {
+    ver = signal(0)
+    // computed: the sum of all values, recomputed only when the list changes.
+    sum_sig = computed(func() {
+        get(ver)
+        s := 0
+        i := 0
+        while i < n { s = s + vals[i]  i = i + 1 }
+        return s
+    })
+    bind("sum",   func() { return str(get(sum_sig)) })
+    bind("count", func() { get(ver)  return str(n) })
+    // keyed list: keys as a CSV string (tracking ver); each item rendered once.
+    each("items",
+        func() { get(ver)  return csv(ids) },
+        func(id) { return "<b>" + str(val_of(id)) + "</b>" })
+}
+
+export func add(x) {
+    ids = append(ids, nid)
+    vals = append(vals, x)
+    nid = nid + 1
+    n = n + 1
+    bump_ver()
+}
+
+export func pop() {
+    if n > 0 {
+        ni := []int{}
+        nv := []int{}
+        i := 0
+        while i < n - 1 { ni = append(ni, ids[i])  nv = append(nv, vals[i])  i = i + 1 }
+        ids = ni  vals = nv  n = n - 1
+        bump_ver()
+    }
+}
+
+export func reverse() {
+    ni := []int{}
+    nv := []int{}
+    i := n - 1
+    while i >= 0 { ni = append(ni, ids[i])  nv = append(nv, vals[i])  i = i - 1 }
+    ids = ni  vals = nv
+    bump_ver()
+}
+
+// sort ascending by value (bubble sort over the parallel arrays — keys move with
+// their values, so the list emits reorders only, not re-renders).
+export func sort_up() {
+    i := 0
+    while i < n {
+        j := 0
+        while j < n - 1 {
+            if vals[j] > vals[j + 1] {
+                tv := vals[j]  vals[j] = vals[j + 1]  vals[j + 1] = tv
+                ti := ids[j]   ids[j] = ids[j + 1]    ids[j + 1] = ti
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    bump_ver()
+}

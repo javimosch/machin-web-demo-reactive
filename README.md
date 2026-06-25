@@ -1,76 +1,64 @@
-# machin-web-demo-reactive — signals + a patch list, in machin
+# machin-web-demo-reactive — signals, computed, and a keyed list, in machin
 
-A counter whose **state and view logic live entirely in machin**, compiled to
-WebAssembly, with **fine-grained reactivity**: each piece of the view is bound to
-a signal, and a click patches **only the slots that actually changed** — no
-`innerHTML` replacement, no virtual-DOM diff. It's the Solid/Leptos model, here in
-MFL.
+A reactive list whose **state and view logic live entirely in machin**, compiled
+to WebAssembly, with **fine-grained reactivity**: a **computed** sum, live
+bindings, and a **keyed list** that emits only the DOM deltas — no `innerHTML`
+replacement, no virtual-DOM diff. It's the Solid/Leptos model, in MFL.
 
 ![screenshot](screenshot.png)
-
-*(Only the changed slots flash — `count`, `n²`, `fib` update on a bump; `step`
-doesn't, because nothing it reads changed.)*
 
 ## The model
 
 [`reactive.src`](reactive.src) (from
 [machin/framework](https://github.com/javimosch/machin/tree/main/framework)) is a
-~70-line runtime:
+~200-line runtime:
 
-- **signals** hold state — `c := signal(0)`, `get(c)`, `set(c, v)`.
-- **bindings** are compute closures tied to a DOM slot — `bind("count", func(){ return str(get(c)) })`.
-  While a binding first runs, every signal it reads is **auto-tracked** as a dependency.
-- on `set`, **only the bindings that read that signal** recompute, and only those
-  whose rendered **text actually changed** emit a patch: `dom_patch(slot, value)`.
+- **`signal(v)`** holds state; **`get`** / **`set`** read & write it (a `set` only
+  notifies if the value changed).
+- **`computed(func(){ return … })`** is a memoized derived signal — here, the sum
+  of the list. It recomputes only when a signal it reads changes.
+- **`bind(slot, func(){ return str(…) })`** patches a DOM text slot on change.
+- **`each(container, keys, item)`** is **keyed list reconciliation**: `keys()`
+  returns the ordered keys as a CSV string, `item(key)` renders an item once. On a
+  change it emits only `list_insert` (new), `list_remove` (gone), and `list_order`
+  (reorder).
 
-The whole "patch list" is just that sequence of `dom_patch` calls — the host sets
-the `textContent` of the handful of changed slots. The component (`app.src`):
-
-```go
-var count = 0    // the count signal's id
-var step = 0     // the step signal's id
-
-export func start() {
-    count = signal(0)
-    step = signal(1)
-    bind("count", func() { return str(get(count)) })
-    bind("sq",    func() { return str(get(count) * get(count)) })
-    bind("fib",   func() { return str(fib(get(count))) })
-    bind("step",  func() { return str(get(step)) })
-}
-export func bump(dir)   { set(count, get(count) + dir * get(step)) }
-export func set_step(s) { set(step, s) }
-```
+Every reaction auto-tracks the signals it reads, so a change recomputes only the
+affected reactions, and only changed text/keys hit the DOM.
 
 ## What "fine-grained" buys you (verified)
 
 | action | patches emitted |
 |---|---|
-| load | `count=0, sq=0, fib=0, step=1` |
-| `+ step` (×1) | `count=1, sq=1, fib=1`  — **step untouched** |
-| `+ step` again | `count=2, sq=4`  — **`fib` not patched** (`fib(2)=fib(1)=1`, text unchanged) |
-| `step: 5` | `step=5`  — **only step** |
-| `+ step` | `count=7, sq=49, fib=13` |
+| `add 10` | `sum=10, count=1, insert #1, order 1` |
+| `add 3` | `sum=13, count=2, insert #2, order 1,2`  *(item 1 not re-rendered)* |
+| `sort ↑` | `order 2,3,1`  *(**only** a reorder — sum unchanged, no item re-render)* |
+| `pop` | `sum=…, count=…, remove #k, order …` |
 
-Two signals, independent dependency graphs; a change touches the minimum.
+Sorting a list of N items moves N DOM nodes and recomputes nothing else; the
+`sum` only patches when it actually changes.
 
-## How it's wired
+## The component (`app.src`)
 
-machin builds on:
-- **`[]func`** (slices of functions, machin v0.53.0) — the binding registry is a
-  `[]func` of compute closures.
-- **package globals** (v0.52.0) — the signal store (`[]int`) and binding tables.
-- the **`--target wasm`** bridge (v0.50.0) — `export func`s the host calls; an
-  `extern "env" { fn dom_patch(string, string) }` the host supplies.
-
-The JS host is a few lines: decode the slot/value strings from wasm memory and set
-the matching `[data-s="…"]` element's text. (It also includes a tiny **no-op WASI
-shim** — indirect closure calls keep wasi-libc's float-format symbols in the
-binary; they're imported but never called.)
+```go
+export func start() {
+    ver = signal(0)
+    sum_sig = computed(func() {          // derived: the sum, memoized
+        get(ver)  s := 0  i := 0
+        while i < n { s = s + vals[i]  i = i + 1 }
+        return s
+    })
+    bind("sum",   func() { return str(get(sum_sig)) })
+    bind("count", func() { get(ver)  return str(n) })
+    each("items",                         // keyed list
+        func() { get(ver)  return csv(ids) },
+        func(id) { return "<b>" + str(val_of(id)) + "</b>" })
+}
+```
 
 ## Build & run
 
-Needs `machin` (**v0.53.0+**) and [`zig`](https://ziglang.org).
+Needs `machin` (**v0.54.0+**) and [`zig`](https://ziglang.org).
 
 ```sh
 ./build.sh                       # → app.wasm
@@ -78,11 +66,16 @@ python3 -m http.server 8000      # serve over http (not file://)
 # open http://localhost:8000/
 ```
 
+The JS host is a few lines — decode the slot/key/html strings from wasm memory and
+apply each op (`dom_patch` / `list_insert` / `list_remove` / `list_order`). It also
+includes a tiny **no-op WASI shim**: indirect closure calls keep wasi-libc's
+float-format symbols in the binary; they're imported but never called.
+
 ## What's next
 
-This is the reactive core. Beyond it: derived/computed signals as first-class
-bindings, list reconciliation (keyed children), and reusing the server-rendered
-DOM on hydration. See the
+This is the reactive core (signals, computed, keyed lists). Beyond it: a
+templating helper so a component declares its slots without hand-written HTML, and
+reusing a server-rendered DOM on hydration. See the
 [web north star](https://github.com/javimosch/machin/blob/main/docs/NORTH-STAR-WEB.md).
 
 ## License
