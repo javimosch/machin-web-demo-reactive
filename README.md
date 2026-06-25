@@ -17,14 +17,16 @@ replacement, no virtual-DOM diff. It's the Solid/Leptos model, in MFL.
   notifies if the value changed).
 - **`computed(func(){ return … })`** is a memoized derived signal — here, the sum
   of the list. It recomputes only when a signal it reads changes.
-- **`bind(slot, func(){ return str(…) })`** patches a DOM text slot on change.
-- **`each(container, keys, item)`** is **keyed list reconciliation**: `keys()`
-  returns the ordered keys as a CSV string, `item(key)` renders an item once. On a
-  change it emits only `list_insert` (new), `list_remove` (gone), and `list_order`
-  (reorder).
+- **`slot(name, compute)`** returns the markup for a reactive text node and wires
+  its binding; **`list(name, keys, item)`** does the same for a keyed list (`keys()`
+  returns the ordered keys as a CSV string, `item(key)` renders an item once).
+- **`mount(root, html)`** sets the root's HTML once, then activates the queued
+  bindings/lists. So the component declares its **markup and reactivity together**
+  — no hand-written HTML skeleton, no manual `data-s` wiring.
 
 Every reaction auto-tracks the signals it reads, so a change recomputes only the
-affected reactions, and only changed text/keys hit the DOM.
+affected reactions, and only changed text/keys hit the DOM. A keyed list emits only
+`list_insert` (new) / `list_remove` (gone) / `list_order` (reorder).
 
 ## What "fine-grained" buys you (verified)
 
@@ -40,6 +42,9 @@ Sorting a list of N items moves N DOM nodes and recomputes nothing else; the
 
 ## The component (`app.src`)
 
+The component declares its markup and reactive slots together, then mounts it —
+`index.html` is just `<div id="app"></div>`:
+
 ```go
 export func start() {
     ver = signal(0)
@@ -48,11 +53,12 @@ export func start() {
         while i < n { s = s + vals[i]  i = i + 1 }
         return s
     })
-    bind("sum",   func() { return str(get(sum_sig)) })
-    bind("count", func() { get(ver)  return str(n) })
-    each("items",                         // keyed list
-        func() { get(ver)  return csv(ids) },
-        func(id) { return "<b>" + str(val_of(id)) + "</b>" })
+    mount("app",
+        "<div class=stats>sum: " + slot("sum", func() { return str(get(sum_sig)) }) +
+        " · count: " + slot("count", func() { get(ver)  return str(n) }) + "</div>" +
+        list("items",                     // keyed list
+            func() { get(ver)  return csv(ids) },
+            func(id) { return "<b>" + str(val_of(id)) + "</b>" }))
 }
 ```
 
@@ -73,10 +79,10 @@ float-format symbols in the binary; they're imported but never called.
 
 ## What's next
 
-This is the reactive core (signals, computed, keyed lists). Beyond it: a
-templating helper so a component declares its slots without hand-written HTML, and
-reusing a server-rendered DOM on hydration. See the
-[web north star](https://github.com/javimosch/machin/blob/main/docs/NORTH-STAR-WEB.md).
+This has the reactive core *and* templating (signals, computed, keyed lists, and
+`mount`/`slot`/`list` so a component owns its markup). Beyond it: composing many
+such components into a real app, and reusing a server-rendered DOM on hydration.
+See the [web north star](https://github.com/javimosch/machin/blob/main/docs/NORTH-STAR-WEB.md).
 
 ## License
 

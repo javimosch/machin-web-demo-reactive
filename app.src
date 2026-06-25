@@ -30,12 +30,18 @@ export func start() {
         while i < n { s = s + vals[i]  i = i + 1 }
         return s
     })
-    bind("sum",   func() { return str(get(sum_sig)) })
-    bind("count", func() { get(ver)  return str(n) })
-    // keyed list: keys as a CSV string (tracking ver); each item rendered once.
-    each("items",
-        func() { get(ver)  return csv(ids) },
-        func(id) { return "<b>" + str(val_of(id)) + "</b>" })
+    // The component declares its markup AND its reactive slots in one place, then
+    // mounts it — no hand-written HTML skeleton, no manual data-s wiring.
+    mount("app",
+        "<div class=stats>" +
+            "<div class=stat><div class=k>sum</div><div class=v>" +
+                slot("sum", func() { return str(get(sum_sig)) }) + "</div></div>" +
+            "<div class=stat><div class=k>count</div><div class=v>" +
+                slot("count", func() { get(ver)  return str(n) }) + "</div></div>" +
+        "</div>" +
+        list("items",
+            func() { get(ver)  return csv(ids) },
+            func(id) { return "<b>" + str(val_of(id)) + "</b>" }))
 }
 
 export func add(x) {

@@ -21,12 +21,12 @@
   .stat .v { font-size: 34px; font-weight: 800; line-height: 1;
     background: linear-gradient(90deg, #66e0ff, #8b9bff); -webkit-background-clip: text;
     background-clip: text; color: transparent; }
-  .items { list-style: none; margin: 0 0 16px; padding: 8px; min-height: 56px;
+  #items { list-style: none; margin: 0 0 16px; padding: 8px; min-height: 56px;
     display: flex; flex-wrap: wrap; gap: 8px; background: #0b101d;
     border: 1px solid #1c2742; border-radius: 10px; }
-  .items li { padding: 6px 12px; border-radius: 8px; background: #1a2545;
-    border: 1px solid #2c3a63; font-weight: 700; }
-  .items li b { color: #cfe0ff; font-weight: 800; }
+  #items li { padding: 6px 12px; border-radius: 8px; background: #1a2545;
+    border: 1px solid #2c3a63; font-weight: 700; list-style: none; }
+  #items li b { color: #cfe0ff; font-weight: 800; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
   button { padding: 9px 14px; font-size: 14px; font-weight: 700; cursor: pointer;
     border-radius: 9px; border: 1px solid #324a7a; background: #1a2545; color: #e6e6f0; }
@@ -41,11 +41,8 @@
 <body>
   <main class="card">
     <h1>machin · reactive list</h1>
-    <div class="stats">
-      <div class="stat"><div class="k">sum</div><div class="v" data-s="sum">0</div></div>
-      <div class="stat"><div class="k">count</div><div class="v" data-s="count">0</div></div>
-    </div>
-    <ul id="items" class="items"></ul>
+    <!-- the component renders its own markup into #app via mount() -->
+    <div id="app"></div>
     <div class="row">
       <button id="add" class="primary">+ add</button>
       <button id="pop">− pop</button>
@@ -64,6 +61,8 @@
 
   const imports = {
     env: {
+      // mount → the component's initial HTML (set once)
+      dom_mount: (r, h) => { document.getElementById(cstr(r)).innerHTML = cstr(h); },
       // bind → set a text slot
       dom_patch: (s, v) => { const el = document.querySelector(`[data-s="${cstr(s)}"]`); if (el) { el.textContent = cstr(v); flash(el); } },
       // each → keyed list ops (the patch list): insert / remove / reorder
